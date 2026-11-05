@@ -3,13 +3,14 @@
 
 Launch with `python3 app.py` (Kali) or `python app.py` (Windows dev, tools are stubbed).
 Importing this module must not touch the network; the LLM client only talks to localhost
-and only when the user clicks "Explain output" / "What next?".
+and only when the user clicks "Explain output" / "What next?" / sends a chat message.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, scrolledtext, ttk
@@ -30,6 +31,30 @@ PHASE_CHOICES = [
     (6, "6-7 LAN"),
 ]
 
+# ---------------------------------------------------------------------------
+# Dark theme palette — clam base theme, no external deps. Kept as module-level
+# constants so every widget builder can reference the same colors.
+# ---------------------------------------------------------------------------
+PALETTE = {
+    "bg": "#1e1f2b",         # darkest — header strip
+    "panel": "#262838",      # app background / panes
+    "panel_alt": "#2d2f42",  # inputs, tree, cards
+    "text": "#e6e6ef",
+    "muted": "#9699b0",
+    "accent": "#5bc0be",
+    "accent_dark": "#3a8f8d",
+    "red": "#e2566b",
+    "red_dark": "#2a0b10",
+    "green": "#4fd480",
+    "green_dark": "#113821",
+    "border": "#3a3c52",
+}
+
+UI_FONT = ("Segoe UI", 10)
+UI_FONT_BOLD = ("Segoe UI", 10, "bold")
+HEADER_FONT = ("Segoe UI", 14, "bold")
+MONO_FONT = ("Consolas", 10)
+
 
 def load_config() -> dict:
     """Read config.json from disk. No network calls — local file only."""
@@ -43,7 +68,8 @@ class DogparkApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("DOGPARK Console")
-        self.geometry("1150x720")
+        self.geometry("1320x780")
+        self.minsize(980, 620)
 
         self.config_data = load_config()
         self.scope = Scope.from_config(self.config_data)
@@ -66,25 +92,124 @@ class DogparkApp(tk.Tk):
         self.custom_path = custom.default_path()
         self.custom_actions: tuple = custom.load_custom_actions(self.custom_path)
 
+        # AI chat panel state.
+        self.chat_history: list[dict] = []
+        self._chat_placeholder_seq = 0
+        self._console_placeholder_seq = 0
+
         self._build_layout()
         self._refresh_tree()
+
+    # ------------------------------------------------------------------
+    # Theme
+    # ------------------------------------------------------------------
+    def _apply_theme(self):
+        p = PALETTE
+        self.configure(background=p["panel"])
+        style = ttk.Style(self)
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+
+        style.configure(
+            ".",
+            background=p["panel"],
+            foreground=p["text"],
+            font=UI_FONT,
+            fieldbackground=p["panel_alt"],
+            bordercolor=p["border"],
+            lightcolor=p["panel_alt"],
+            darkcolor=p["panel_alt"],
+            troughcolor=p["panel_alt"],
+        )
+        style.configure("TFrame", background=p["panel"])
+        style.configure("TLabel", background=p["panel"], foreground=p["text"])
+        style.configure("TButton", background=p["panel_alt"], foreground=p["text"], padding=6, relief="flat")
+        style.map(
+            "TButton",
+            background=[("active", p["accent_dark"]), ("disabled", p["panel"])],
+            foreground=[("disabled", p["muted"])],
+        )
+        style.configure("TCheckbutton", background=p["panel"], foreground=p["text"])
+        style.map("TCheckbutton", background=[("active", p["panel"])])
+        style.configure("TEntry", fieldbackground=p["panel_alt"], foreground=p["text"], insertcolor=p["text"])
+        style.configure(
+            "Mono.TEntry", font=MONO_FONT, fieldbackground=p["panel_alt"], foreground=p["text"],
+            insertcolor=p["text"],
+        )
+        style.configure(
+            "TCombobox",
+            fieldbackground=p["panel_alt"],
+            background=p["panel_alt"],
+            foreground=p["text"],
+            arrowcolor=p["text"],
+        )
+        style.map(
+            "TCombobox",
+            fieldbackground=[("readonly", p["panel_alt"])],
+            foreground=[("readonly", p["text"])],
+        )
+        style.configure(
+            "Treeview",
+            background=p["panel_alt"],
+            fieldbackground=p["panel_alt"],
+            foreground=p["text"],
+            borderwidth=0,
+        )
+        style.map("Treeview", background=[("selected", p["accent_dark"])], foreground=[("selected", p["text"])])
+        style.configure("Treeview.Heading", background=p["panel"], foreground=p["text"])
+        style.configure("TPanedwindow", background=p["panel"])
+        style.configure("TNotebook", background=p["panel"], borderwidth=0)
+        style.configure("TNotebook.Tab", background=p["panel_alt"], foreground=p["text"], padding=(12, 5))
+        style.map("TNotebook.Tab", background=[("selected", p["accent_dark"])])
+        style.configure("TSpinbox", fieldbackground=p["panel_alt"], foreground=p["text"], arrowcolor=p["text"])
+
+        style.configure("Header.TFrame", background=p["bg"])
+        style.configure("Header.TLabel", background=p["bg"], foreground=p["text"], font=HEADER_FONT)
+        style.configure("Sub.TLabel", background=p["bg"], foreground=p["muted"], font=UI_FONT)
+
+        style.configure("PillGreen.TLabel", background=p["green"], foreground=p["green_dark"], padding=(10, 3), font=UI_FONT_BOLD)
+        style.configure("PillRed.TLabel", background=p["red"], foreground=p["red_dark"], padding=(10, 3), font=UI_FONT_BOLD)
+        style.configure("PillGray.TLabel", background=p["panel_alt"], foreground=p["muted"], padding=(10, 3), font=UI_FONT_BOLD)
 
     # ------------------------------------------------------------------
     # Layout
     # ------------------------------------------------------------------
     def _build_layout(self):
+        self._apply_theme()
+        self._build_header()
         self._build_top_bar()
 
-        body = ttk.Frame(self)
-        body.pack(fill="both", expand=True, padx=6, pady=6)
+        self.main_paned = ttk.PanedWindow(self, orient="horizontal")
+        self.main_paned.pack(fill="both", expand=True, padx=8, pady=(0, 8))
 
-        self._build_tree(body)
-        self._build_center(body)
+        left = ttk.Frame(self.main_paned)
+        self.main_paned.add(left, weight=1)
+        self._build_tree(left)
 
-        self._build_console()
+        center = ttk.Frame(self.main_paned)
+        self.main_paned.add(center, weight=3)
+        self._build_center(center)
+
+        right = ttk.Frame(self.main_paned)
+        self.main_paned.add(right, weight=2)
+        self._build_chat(right)
+
+    def _build_header(self):
+        header = ttk.Frame(self, style="Header.TFrame")
+        header.pack(fill="x")
+        ttk.Label(header, text="DOGPARK Console", style="Header.TLabel").pack(side="left", padx=14, pady=10)
+        self.header_status_var = tk.StringVar()
+        ttk.Label(header, textvariable=self.header_status_var, style="Sub.TLabel").pack(side="right", padx=14)
+        self._update_header_status()
+
+    def _update_header_status(self):
+        phase_label = dict(PHASE_CHOICES).get(self.current_phase.get(), str(self.current_phase.get()))
+        self.header_status_var.set(f"Phase: {phase_label}    •    Day {self.day.get()}")
 
     def _build_top_bar(self):
-        bar = ttk.Frame(self)
+        bar = ttk.Frame(self, padding=(8, 8))
         bar.pack(fill="x", padx=6, pady=6)
 
         ttk.Label(bar, text="Target:").pack(side="left")
@@ -92,9 +217,7 @@ class DogparkApp(tk.Tk):
         target_entry.pack(side="left", padx=(2, 8))
         target_entry.bind("<KeyRelease>", lambda e: self._on_target_changed())
 
-        self.scope_badge = ttk.Label(
-            bar, textvariable=self.scope_badge_text, foreground="red", font=("TkDefaultFont", 9, "bold")
-        )
+        self.scope_badge = ttk.Label(bar, textvariable=self.scope_badge_text, style="PillGray.TLabel")
         self.scope_badge.pack(side="left", padx=(0, 16))
 
         ttk.Label(bar, text="Phase:").pack(side="left")
@@ -119,20 +242,29 @@ class DogparkApp(tk.Tk):
 
         ttk.Label(bar, text="Day:").pack(side="left")
         ttk.Spinbox(bar, from_=1, to=99, textvariable=self.day, width=4).pack(side="left")
+        self.day.trace_add("write", lambda *_: self._update_header_status())
 
     def _build_tree(self, parent):
-        left = ttk.Frame(parent, width=280)
-        left.pack(side="left", fill="y", padx=(0, 6))
-
-        ttk.Label(left, text="Tools (current phase)").pack(anchor="w")
-        self.tree = ttk.Treeview(left, show="tree")
-        self.tree.pack(fill="y", expand=True)
+        ttk.Label(parent, text="Tools (current phase)").pack(anchor="w", padx=8, pady=(8, 4))
+        self.tree = ttk.Treeview(parent, show="tree")
+        self.tree.pack(fill="both", expand=True, padx=8, pady=(0, 8))
         self.tree.bind("<<TreeviewSelect>>", self._on_tree_select)
+        self.tree.tag_configure("risk_loud", foreground=PALETTE["red"])
+        self.tree.tag_configure("risk_quiet", foreground=PALETTE["accent"])
 
     def _build_center(self, parent):
-        center = ttk.Frame(parent)
-        center.pack(side="left", fill="both", expand=True)
+        paned = ttk.PanedWindow(parent, orient="vertical")
+        paned.pack(fill="both", expand=True)
 
+        builder = ttk.Frame(paned, padding=(8, 8))
+        paned.add(builder, weight=2)
+        self._build_builder(builder)
+
+        console_frame = ttk.Frame(paned, padding=(8, 4))
+        paned.add(console_frame, weight=1)
+        self._build_console(console_frame)
+
+    def _build_builder(self, center):
         self.description_label = ttk.Label(center, text="Select an action from the tree.", wraplength=650, justify="left")
         self.description_label.pack(anchor="w", pady=(0, 6))
 
@@ -140,7 +272,7 @@ class DogparkApp(tk.Tk):
         self.inputs_frame.pack(fill="x", pady=(0, 6))
 
         ttk.Label(center, text="Command (editable — review before running):").pack(anchor="w")
-        self.command_entry = ttk.Entry(center, textvariable=self.command_var)
+        self.command_entry = ttk.Entry(center, textvariable=self.command_var, style="Mono.TEntry")
         self.command_entry.pack(fill="x", pady=(0, 6))
 
         button_row = ttk.Frame(center)
@@ -156,15 +288,74 @@ class DogparkApp(tk.Tk):
         ttk.Button(button_row, text="Reload custom", command=self._on_reload_custom).pack(side="left", padx=4)
         ttk.Button(button_row, text="Generate report", command=self._on_generate_report).pack(side="left", padx=4)
 
-    def _build_console(self):
-        console_frame = ttk.Frame(self)
-        console_frame.pack(fill="both", expand=True, padx=6, pady=(0, 6))
-
+    def _build_console(self, console_frame):
         ttk.Label(console_frame, text="Output console:").pack(anchor="w")
-        self.console = scrolledtext.ScrolledText(console_frame, height=14, font=("Consolas", 9))
+        self.console = scrolledtext.ScrolledText(
+            console_frame,
+            height=10,
+            font=MONO_FONT,
+            background=PALETTE["bg"],
+            foreground=PALETTE["text"],
+            insertbackground=PALETTE["text"],
+            borderwidth=0,
+            highlightthickness=0,
+        )
         self.console.pack(fill="both", expand=True)
 
         ttk.Button(console_frame, text="Save copy", command=self._on_save_console).pack(anchor="e", pady=4)
+
+    def _build_chat(self, parent):
+        ttk.Label(parent, text="AI recon advisor (on-box, localhost only)", font=UI_FONT_BOLD).pack(
+            anchor="w", padx=8, pady=(8, 4)
+        )
+
+        self.chat_view = scrolledtext.ScrolledText(
+            parent,
+            wrap="word",
+            state="disabled",
+            font=MONO_FONT,
+            background=PALETTE["bg"],
+            foreground=PALETTE["text"],
+            insertbackground=PALETTE["text"],
+            borderwidth=0,
+            highlightthickness=0,
+        )
+        self.chat_view.pack(fill="both", expand=True, padx=8, pady=(0, 6))
+        self.chat_view.tag_configure("user", foreground=PALETTE["accent"], font=(MONO_FONT[0], MONO_FONT[1], "bold"))
+        self.chat_view.tag_configure("ai", foreground=PALETTE["text"])
+        self.chat_view.tag_configure("meta", foreground=PALETTE["muted"], font=(MONO_FONT[0], 9, "italic"))
+
+        quick_row = ttk.Frame(parent)
+        quick_row.pack(fill="x", padx=8)
+        ttk.Button(quick_row, text="Stealthy recon plan", command=self._on_chat_recon_plan).pack(
+            side="left", fill="x", expand=True
+        )
+
+        input_row = ttk.Frame(parent)
+        input_row.pack(fill="x", padx=8, pady=8)
+        self.chat_input = tk.Text(
+            input_row,
+            height=3,
+            font=UI_FONT,
+            background=PALETTE["panel_alt"],
+            foreground=PALETTE["text"],
+            insertbackground=PALETTE["text"],
+            wrap="word",
+            borderwidth=0,
+            highlightthickness=1,
+            highlightbackground=PALETTE["border"],
+        )
+        self.chat_input.pack(side="left", fill="both", expand=True)
+        self.chat_input.bind("<Control-Return>", self._on_chat_send_event)
+        ttk.Button(input_row, text="Send\n(Ctrl+Enter)", command=self._on_chat_send).pack(
+            side="left", padx=(6, 0), fill="y"
+        )
+
+        self._append_chat(
+            "ai",
+            "Ask me which recon command to run first — I'll prioritize staying quiet. Try "
+            "'Stealthy recon plan', or type your own question below.",
+        )
 
     # ------------------------------------------------------------------
     # Scope
@@ -173,16 +364,16 @@ class DogparkApp(tk.Tk):
         target = self.target_var.get().strip()
         if not target:
             self.scope_badge_text.set("enter a target")
-            self.scope_badge.configure(foreground="gray")
+            self.scope_badge.configure(style="PillGray.TLabel")
             self.run_button.configure(state="disabled")
             return
         result = self.scope.check(target)
         if result.ok:
-            self.scope_badge_text.set(f"IN SCOPE {result.ip}")
-            self.scope_badge.configure(foreground="dark green")
+            self.scope_badge_text.set(f"IN SCOPE  {result.ip}")
+            self.scope_badge.configure(style="PillGreen.TLabel")
         else:
             self.scope_badge_text.set(f"REFUSED: {result.reason}")
-            self.scope_badge.configure(foreground="red")
+            self.scope_badge.configure(style="PillRed.TLabel")
         self._update_run_button_state()
         self._update_command_preview()
 
@@ -199,6 +390,7 @@ class DogparkApp(tk.Tk):
         phase, _ = PHASE_CHOICES[index]
         self.current_phase.set(phase)
         self._refresh_tree()
+        self._update_header_status()
 
     def _refresh_tree(self):
         self.tree.delete(*self.tree.get_children())
@@ -224,7 +416,9 @@ class DogparkApp(tk.Tk):
             tool_node = self.tree.insert("", "end", text=tool.name, values=(tool.name,), open=False)
             for action in shown:
                 label = action.label + ("  ·loud" if action.risk == "loud" else "")
-                self.tree.insert(tool_node, "end", text=label, values=(action.id,))
+                self.tree.insert(
+                    tool_node, "end", text=label, values=(action.id,), tags=(f"risk_{action.risk}",)
+                )
 
         # User/AI-added commands under their own clearly labelled group.
         custom_shown = [a for a in self.custom_actions if visible(a)]
@@ -232,7 +426,9 @@ class DogparkApp(tk.Tk):
             node = self.tree.insert("", "end", text=custom.CUSTOM_GROUP, values=(custom.CUSTOM_GROUP,), open=True)
             for action in custom_shown:
                 label = action.label + ("  ·loud" if action.risk == "loud" else "")
-                self.tree.insert(node, "end", text=label, values=(action.id,))
+                self.tree.insert(
+                    node, "end", text=label, values=(action.id,), tags=(f"risk_{action.risk}",)
+                )
 
     def _on_tree_select(self, event):
         selection = self.tree.selection()
@@ -310,12 +506,29 @@ class DogparkApp(tk.Tk):
         self.command_var.set(action.build_command(values))
 
     # ------------------------------------------------------------------
-    # Buttons
+    # Console helpers (placeholder text for in-flight async calls)
     # ------------------------------------------------------------------
     def _append_console(self, line: str):
         self.console.insert("end", line + "\n")
         self.console.see("end")
 
+    def _replace_console_placeholder(self, placeholder: str, final: str):
+        """Swap a 'thinking…' placeholder line for the real result once an LLM call returns,
+        without disturbing anything the user typed/ran in the meantime."""
+        content = self.console.get("1.0", "end")
+        idx = content.rfind(placeholder)
+        if idx == -1:
+            self._append_console(final)
+            return
+        start = f"1.0+{idx}c"
+        end = f"1.0+{idx + len(placeholder)}c"
+        self.console.delete(start, end)
+        self.console.insert(start, final)
+        self.console.see("end")
+
+    # ------------------------------------------------------------------
+    # Buttons
+    # ------------------------------------------------------------------
     def _on_run(self):
         target = self.target_var.get().strip()
         result = self.scope.check(target)
@@ -348,21 +561,43 @@ class DogparkApp(tk.Tk):
         self._append_console("[stop requested]")
 
     def _on_explain(self):
+        """Ask the local LLM to explain the console output. Threaded so the GUI never blocks
+        waiting on the (localhost-only) network call; a 'thinking…' placeholder is shown
+        immediately and swapped for the real answer via self.after()."""
         text = self.console.get("1.0", "end").strip()
         if not text:
             messagebox.showinfo("Explain output", "No console output to explain yet.")
             return
-        explanation = self.llm.explain(text[-4000:], context=f"action={self.selected_action_id}")
-        self._append_console(f"[explain] {explanation}")
+        self._console_placeholder_seq += 1
+        tag = self._console_placeholder_seq
+        placeholder = f"[explain #{tag}] thinking…"
+        self._append_console(placeholder)
+        context = f"action={self.selected_action_id}"
+        snippet = text[-4000:]
+
+        def worker():
+            explanation = self.llm.explain(snippet, context=context)
+            self.after(0, self._replace_console_placeholder, placeholder, f"[explain #{tag}] {explanation}")
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _on_suggest(self):
+        """Ask the local LLM for next-step ideas. Threaded like Explain above."""
         state = {
             "phase": self.current_phase.get(),
             "target": self.target_var.get().strip(),
             "last_action": self.selected_action_id or "none",
         }
-        suggestion = self.llm.suggest_next(state)
-        self._append_console(f"[suggest] {suggestion}")
+        self._console_placeholder_seq += 1
+        tag = self._console_placeholder_seq
+        placeholder = f"[suggest #{tag}] thinking…"
+        self._append_console(placeholder)
+
+        def worker():
+            suggestion = self.llm.suggest_next(state)
+            self.after(0, self._replace_console_placeholder, placeholder, f"[suggest #{tag}] {suggestion}")
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _on_reload_custom(self):
         """Re-read the custom/AI command store (e.g. after the on-box AI appended to it)."""
@@ -391,6 +626,89 @@ class DogparkApp(tk.Tk):
             return
         with open(path, "w", encoding="utf-8") as f:
             f.write(self.console.get("1.0", "end"))
+
+    # ------------------------------------------------------------------
+    # AI chat panel
+    # ------------------------------------------------------------------
+    def _append_chat(self, role: str, text: str):
+        who = "You" if role == "user" else "AI"
+        self.chat_view.configure(state="normal")
+        self.chat_view.insert("end", f"{who}: {text.rstrip()}\n\n", (role,))
+        self.chat_view.configure(state="disabled")
+        self.chat_view.see("end")
+
+    def _append_chat_placeholder(self) -> str:
+        self._chat_placeholder_seq += 1
+        tag = f"thinking_{self._chat_placeholder_seq}"
+        self.chat_view.configure(state="normal")
+        self.chat_view.insert("end", "AI: thinking…\n\n", ("meta", tag))
+        self.chat_view.configure(state="disabled")
+        self.chat_view.see("end")
+        return tag
+
+    def _replace_chat_placeholder(self, placeholder_tag: str, role: str, text: str):
+        who = "You" if role == "user" else "AI"
+        self.chat_view.configure(state="normal")
+        ranges = self.chat_view.tag_ranges(placeholder_tag)
+        if ranges:
+            start, end = ranges[0], ranges[1]
+            self.chat_view.delete(start, end)
+            self.chat_view.insert(start, f"{who}: {text.rstrip()}\n\n", (role,))
+        else:
+            self.chat_view.insert("end", f"{who}: {text.rstrip()}\n\n", (role,))
+        self.chat_view.configure(state="disabled")
+        self.chat_view.see("end")
+
+    def _on_chat_send_event(self, event):
+        self._on_chat_send()
+        return "break"  # swallow the Enter so it doesn't also insert a newline
+
+    def _on_chat_send(self):
+        text = self.chat_input.get("1.0", "end").strip()
+        if not text:
+            return
+        self.chat_input.delete("1.0", "end")
+        self._send_chat_message(text)
+
+    def _on_chat_recon_plan(self):
+        self._send_chat_message(
+            "What's the stealthiest order of recon commands to discover the blue team on the "
+            "in-scope subnet? Start with passive/quiet host discovery."
+        )
+
+    def _chat_context_summary(self) -> str:
+        target = self.target_var.get().strip() or "none set"
+        phase_label = dict(PHASE_CHOICES).get(self.current_phase.get(), str(self.current_phase.get()))
+        return (
+            f"Operator context — phase: {phase_label}; day: {self.day.get()}; "
+            f"target field: {target}; scope status: {self.scope_badge_text.get()}; "
+            f"stealth mode: {'on' if self.stealth_mode.get() else 'off'}."
+        )
+
+    def _send_chat_message(self, text: str):
+        """Thread the chat call so the GUI never blocks on the (localhost-only) LLM. Keeps a
+        capped conversation history for multi-turn context."""
+        self._append_chat("user", text)
+        self.chat_history.append({"role": "user", "content": text})
+        self.chat_history = self.chat_history[-12:]
+
+        placeholder_tag = self._append_chat_placeholder()
+        extra_system = self._chat_context_summary()
+        history_snapshot = list(self.chat_history)
+
+        def worker():
+            reply = self.llm.chat(history_snapshot, extra_system=extra_system)
+            self.after(0, self._on_chat_reply, reply, placeholder_tag)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_chat_reply(self, reply: str | None, placeholder_tag: str):
+        from dogpark.llm import canned_recon_plan
+
+        body = reply.strip() if reply else canned_recon_plan()
+        self._replace_chat_placeholder(placeholder_tag, "ai", body)
+        self.chat_history.append({"role": "assistant", "content": body})
+        self.chat_history = self.chat_history[-12:]
 
 
 class FindingDialog(tk.Toplevel):
@@ -458,14 +776,14 @@ class CustomCommandDialog(tk.Toplevel):
             else:
                 ttk.Entry(row, textvariable=var).pack(side="left", fill="x", expand=True)
             if field in hints:
-                ttk.Label(self, text=hints[field], foreground="gray").pack(anchor="w", padx=86)
+                ttk.Label(self, text=hints[field], foreground=PALETTE["muted"]).pack(anchor="w", padx=86)
 
         ttk.Label(
             self,
             text="Added commands follow the same rules: scope-locked, manual Run, and destructive "
             "templates are refused.",
             wraplength=520,
-            foreground="gray",
+            foreground=PALETTE["muted"],
         ).pack(anchor="w", padx=10, pady=(6, 0))
 
         button_row = ttk.Frame(self)
