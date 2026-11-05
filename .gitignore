@@ -1,0 +1,24 @@
+__pycache__/
+*.py[cod]
+*.log
+*.pyc
+
+# venvs
+.venv/
+venv/
+env/
+
+# evidence/output dirs produced by the app at runtime
+dogpark_output/
+~/dogpark
+dogpark/__pycache__/
+*.jsonl
+
+# editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# pytest
+.pytest_cache/

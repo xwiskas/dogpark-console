@@ -1,0 +1,19 @@
+{
+  "allowed_cidrs": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8"],
+  "lab_subnet": "192.168.1.0/24",
+  "output_dir": "~/dogpark",
+  "wordlists": {
+    "dirb": "/usr/share/wordlists/dirb/common.txt",
+    "rockyou": "/usr/share/wordlists/rockyou.txt"
+  },
+  "llm": {
+    "endpoints": ["http://127.0.0.1:11434", "http://127.0.0.1:8642"],
+    "model": "nemotron-3.5-lightning"
+  },
+  "inventory": {
+    "windows_client": "",
+    "rhel_client": "",
+    "lan_router": "",
+    "domain_controller": ""
+  }
+}

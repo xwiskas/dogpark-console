@@ -1,0 +1,377 @@
+#!/usr/bin/env python3
+"""DOGPARK Console — Tkinter entry point.
+
+Launch with `python3 app.py` (Kali) or `python app.py` (Windows dev, tools are stubbed).
+Importing this module must not touch the network; the LLM client only talks to localhost
+and only when the user clicks "Explain output" / "What next?".
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import tkinter as tk
+from pathlib import Path
+from tkinter import filedialog, messagebox, scrolledtext, ttk
+
+from dogpark import evidence, report, tools
+from dogpark.llm import LLMClient
+from dogpark.runner import Runner
+from dogpark.scope import Scope
+
+CONFIG_PATH = Path(__file__).resolve().parent / "config.json"
+
+PHASE_CHOICES = [
+    (0, "0 Pre-engagement"),
+    (1, "1-2 Subscreen"),
+    (3, "3-5 DMZ"),
+    (6, "6-7 LAN"),
+]
+
+
+def load_config() -> dict:
+    """Read config.json from disk. No network calls — local file only."""
+    if CONFIG_PATH.exists():
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+
+class DogparkApp(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.title("DOGPARK Console")
+        self.geometry("1150x720")
+
+        self.config_data = load_config()
+        self.scope = Scope.from_config(self.config_data)
+        self.output_dir = os.path.expanduser(self.config_data.get("output_dir", "~/dogpark"))
+        Path(self.output_dir).mkdir(parents=True, exist_ok=True)
+        self.runner = Runner(self.output_dir)
+        self.llm = LLMClient.from_config(self.config_data)
+        self.findings = evidence.FindingsStore(self.output_dir)
+
+        self.current_phase = tk.IntVar(value=0)
+        self.day = tk.IntVar(value=1)
+        self.target_var = tk.StringVar()
+        self.scope_badge_text = tk.StringVar(value="enter a target")
+        self.selected_action_id: str | None = None
+        self.input_vars: dict[str, tk.StringVar] = {}
+        self.command_var = tk.StringVar()
+
+        self._build_layout()
+        self._refresh_tree()
+
+    # ------------------------------------------------------------------
+    # Layout
+    # ------------------------------------------------------------------
+    def _build_layout(self):
+        self._build_top_bar()
+
+        body = ttk.Frame(self)
+        body.pack(fill="both", expand=True, padx=6, pady=6)
+
+        self._build_tree(body)
+        self._build_center(body)
+
+        self._build_console()
+
+    def _build_top_bar(self):
+        bar = ttk.Frame(self)
+        bar.pack(fill="x", padx=6, pady=6)
+
+        ttk.Label(bar, text="Target:").pack(side="left")
+        target_entry = ttk.Entry(bar, textvariable=self.target_var, width=24)
+        target_entry.pack(side="left", padx=(2, 8))
+        target_entry.bind("<KeyRelease>", lambda e: self._on_target_changed())
+
+        self.scope_badge = ttk.Label(
+            bar, textvariable=self.scope_badge_text, foreground="red", font=("TkDefaultFont", 9, "bold")
+        )
+        self.scope_badge.pack(side="left", padx=(0, 16))
+
+        ttk.Label(bar, text="Phase:").pack(side="left")
+        phase_box = ttk.Combobox(
+            bar,
+            values=[label for _, label in PHASE_CHOICES],
+            state="readonly",
+            width=16,
+        )
+        phase_box.current(0)
+        phase_box.pack(side="left", padx=(2, 16))
+        phase_box.bind("<<ComboboxSelected>>", lambda e: self._on_phase_changed(phase_box.current()))
+
+        ttk.Label(bar, text=f"Output: {self.output_dir}").pack(side="left", padx=(0, 16))
+
+        ttk.Label(bar, text="Day:").pack(side="left")
+        ttk.Spinbox(bar, from_=1, to=99, textvariable=self.day, width=4).pack(side="left")
+
+    def _build_tree(self, parent):
+        left = ttk.Frame(parent, width=280)
+        left.pack(side="left", fill="y", padx=(0, 6))
+
+        ttk.Label(left, text="Tools (current phase)").pack(anchor="w")
+        self.tree = ttk.Treeview(left, show="tree")
+        self.tree.pack(fill="y", expand=True)
+        self.tree.bind("<<TreeviewSelect>>", self._on_tree_select)
+
+    def _build_center(self, parent):
+        center = ttk.Frame(parent)
+        center.pack(side="left", fill="both", expand=True)
+
+        self.description_label = ttk.Label(center, text="Select an action from the tree.", wraplength=650, justify="left")
+        self.description_label.pack(anchor="w", pady=(0, 6))
+
+        self.inputs_frame = ttk.Frame(center)
+        self.inputs_frame.pack(fill="x", pady=(0, 6))
+
+        ttk.Label(center, text="Command (editable — review before running):").pack(anchor="w")
+        self.command_entry = ttk.Entry(center, textvariable=self.command_var)
+        self.command_entry.pack(fill="x", pady=(0, 6))
+
+        button_row = ttk.Frame(center)
+        button_row.pack(fill="x", pady=(0, 6))
+
+        self.run_button = ttk.Button(button_row, text="Run", command=self._on_run, state="disabled")
+        self.run_button.pack(side="left", padx=(0, 4))
+        ttk.Button(button_row, text="Stop", command=self._on_stop).pack(side="left", padx=4)
+        ttk.Button(button_row, text="Explain output", command=self._on_explain).pack(side="left", padx=4)
+        ttk.Button(button_row, text="What next?", command=self._on_suggest).pack(side="left", padx=4)
+        ttk.Button(button_row, text="Add finding", command=self._on_add_finding).pack(side="left", padx=4)
+        ttk.Button(button_row, text="Generate report", command=self._on_generate_report).pack(side="left", padx=4)
+
+    def _build_console(self):
+        console_frame = ttk.Frame(self)
+        console_frame.pack(fill="both", expand=True, padx=6, pady=(0, 6))
+
+        ttk.Label(console_frame, text="Output console:").pack(anchor="w")
+        self.console = scrolledtext.ScrolledText(console_frame, height=14, font=("Consolas", 9))
+        self.console.pack(fill="both", expand=True)
+
+        ttk.Button(console_frame, text="Save copy", command=self._on_save_console).pack(anchor="e", pady=4)
+
+    # ------------------------------------------------------------------
+    # Scope
+    # ------------------------------------------------------------------
+    def _on_target_changed(self):
+        target = self.target_var.get().strip()
+        if not target:
+            self.scope_badge_text.set("enter a target")
+            self.scope_badge.configure(foreground="gray")
+            self.run_button.configure(state="disabled")
+            return
+        result = self.scope.check(target)
+        if result.ok:
+            self.scope_badge_text.set(f"IN SCOPE {result.ip}")
+            self.scope_badge.configure(foreground="dark green")
+        else:
+            self.scope_badge_text.set(f"REFUSED: {result.reason}")
+            self.scope_badge.configure(foreground="red")
+        self._update_run_button_state()
+        self._update_command_preview()
+
+    def _update_run_button_state(self):
+        target = self.target_var.get().strip()
+        scope_ok = bool(target) and self.scope.check(target).ok
+        has_action = self.selected_action_id is not None
+        self.run_button.configure(state="normal" if (scope_ok and has_action) else "disabled")
+
+    # ------------------------------------------------------------------
+    # Tree / phase
+    # ------------------------------------------------------------------
+    def _on_phase_changed(self, index: int):
+        phase, _ = PHASE_CHOICES[index]
+        self.current_phase.set(phase)
+        self._refresh_tree()
+
+    def _refresh_tree(self):
+        self.tree.delete(*self.tree.get_children())
+        phase = self.current_phase.get()
+        relevant_tools = tools.tools_for_phase(phase) or tools.all_tools()
+        # Host discovery pinned to the top, per spec.
+        ordered = sorted(relevant_tools, key=lambda t: 0 if t.category == "discovery" else 1)
+        for tool in ordered:
+            tool_node = self.tree.insert("", "end", text=tool.name, values=(tool.name,), open=False)
+            for action in tool.actions:
+                if action.phase <= max(phase, action.phase) and (phase == 0 or action.phase in tool.phases or True):
+                    self.tree.insert(tool_node, "end", text=action.label, values=(action.id,))
+
+    def _on_tree_select(self, event):
+        selection = self.tree.selection()
+        if not selection:
+            return
+        item = selection[0]
+        values = self.tree.item(item, "values")
+        if not values:
+            return
+        action_id = values[0]
+        found = tools.find_action(action_id)
+        if not found:
+            return  # a tool-group node, not an action
+        tool, action = found
+        self.selected_action_id = action.id
+        self._render_action(tool, action)
+        self._update_run_button_state()
+
+    # ------------------------------------------------------------------
+    # Action / command building
+    # ------------------------------------------------------------------
+    def _render_action(self, tool, action):
+        risk_note = f"  [risk: {action.risk}]"
+        notes = f"\nNote: {action.notes}" if action.notes else ""
+        self.description_label.configure(
+            text=f"{tool.name} — {action.label}{risk_note}\n{action.description}{notes}"
+        )
+
+        for widget in self.inputs_frame.winfo_children():
+            widget.destroy()
+        self.input_vars = {}
+
+        defaults = {
+            "output": self.output_dir,
+            "wordlist": self.config_data.get("wordlists", {}).get("dirb", ""),
+        }
+        for need in action.needs:
+            row = ttk.Frame(self.inputs_frame)
+            row.pack(fill="x", pady=1)
+            ttk.Label(row, text=f"{need}:", width=12).pack(side="left")
+            var = tk.StringVar(value=defaults.get(need, "" if need != "target" else self.target_var.get()))
+            entry = ttk.Entry(row, textvariable=var)
+            entry.pack(side="left", fill="x", expand=True)
+            var.trace_add("write", lambda *_, n=need: self._update_command_preview())
+            self.input_vars[need] = var
+
+        self._update_command_preview()
+
+    def _current_action(self):
+        if not self.selected_action_id:
+            return None
+        found = tools.find_action(self.selected_action_id)
+        return found[1] if found else None
+
+    def _gather_values(self) -> dict:
+        values = {name: var.get() for name, var in self.input_vars.items()}
+        values.setdefault("target", self.target_var.get().strip())
+        return values
+
+    def _update_command_preview(self):
+        action = self._current_action()
+        if not action:
+            return
+        values = self._gather_values()
+        self.command_var.set(action.build_command(values))
+
+    # ------------------------------------------------------------------
+    # Buttons
+    # ------------------------------------------------------------------
+    def _append_console(self, line: str):
+        self.console.insert("end", line + "\n")
+        self.console.see("end")
+
+    def _on_run(self):
+        target = self.target_var.get().strip()
+        result = self.scope.check(target)
+        if not result.ok:
+            messagebox.showerror("Scope check failed", result.reason)
+            return
+        action = self._current_action()
+        if not action:
+            return
+        command = self.command_var.get()
+        self._append_console(f"$ {command}")
+
+        def on_line(line):
+            self.after(0, self._append_console, line)
+
+        def on_done(run_result):
+            self.after(0, self._append_console, f"[done] exit={run_result.exit_code} log={run_result.log_path}")
+
+        self.runner.run(
+            command=command,
+            target=target,
+            action_id=action.id,
+            day=self.day.get(),
+            on_line=on_line,
+            on_done=on_done,
+        )
+
+    def _on_stop(self):
+        self.runner.stop()
+        self._append_console("[stop requested]")
+
+    def _on_explain(self):
+        text = self.console.get("1.0", "end").strip()
+        if not text:
+            messagebox.showinfo("Explain output", "No console output to explain yet.")
+            return
+        explanation = self.llm.explain(text[-4000:], context=f"action={self.selected_action_id}")
+        self._append_console(f"[explain] {explanation}")
+
+    def _on_suggest(self):
+        state = {
+            "phase": self.current_phase.get(),
+            "target": self.target_var.get().strip(),
+            "last_action": self.selected_action_id or "none",
+        }
+        suggestion = self.llm.suggest_next(state)
+        self._append_console(f"[suggest] {suggestion}")
+
+    def _on_add_finding(self):
+        dialog = FindingDialog(self, default_target=self.target_var.get().strip())
+        self.wait_window(dialog)
+        if dialog.result:
+            finding = self.findings.add(**dialog.result)
+            self._append_console(f"[finding added] {finding.id} — {finding.title}")
+
+    def _on_generate_report(self):
+        written = report.generate(self.output_dir, engagement=self.config_data.get("inventory"))
+        self._append_console(f"[report] generated: {written['report_md']}")
+        messagebox.showinfo("Report generated", f"Report written to:\n{written['report_md']}")
+
+    def _on_save_console(self):
+        path = filedialog.asksaveasfilename(defaultextension=".txt")
+        if not path:
+            return
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(self.console.get("1.0", "end"))
+
+
+class FindingDialog(tk.Toplevel):
+    def __init__(self, parent, default_target: str = ""):
+        super().__init__(parent)
+        self.title("Add finding")
+        self.result = None
+
+        fields = ["target", "severity", "title", "evidence_path", "impact", "remediation"]
+        self.vars = {f: tk.StringVar() for f in fields}
+        self.vars["target"].set(default_target)
+        self.vars["severity"].set("Info")
+
+        for field in fields:
+            row = ttk.Frame(self)
+            row.pack(fill="x", padx=8, pady=2)
+            ttk.Label(row, text=field, width=14).pack(side="left")
+            if field == "severity":
+                ttk.Combobox(
+                    row, textvariable=self.vars[field], values=list(evidence.SEVERITIES), state="readonly"
+                ).pack(side="left", fill="x", expand=True)
+            else:
+                ttk.Entry(row, textvariable=self.vars[field]).pack(side="left", fill="x", expand=True)
+
+        button_row = ttk.Frame(self)
+        button_row.pack(fill="x", padx=8, pady=8)
+        ttk.Button(button_row, text="Add", command=self._on_add).pack(side="right")
+        ttk.Button(button_row, text="Cancel", command=self.destroy).pack(side="right", padx=4)
+
+    def _on_add(self):
+        self.result = {k: v.get() for k, v in self.vars.items()}
+        self.destroy()
+
+
+def main():
+    app = DogparkApp()
+    app.mainloop()
+
+
+if __name__ == "__main__":
+    main()
