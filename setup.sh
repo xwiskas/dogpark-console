@@ -11,6 +11,9 @@ echo
 
 sudo apt update
 sudo apt install -y \
+    python3 \
+    python3-tk \
+    git \
     nmap \
     nikto \
     enum4linux \
@@ -45,5 +48,8 @@ echo "Created ~/dogpark/{runs,session,findings,loot,report}"
 
 echo
 echo "=== Done ==="
+echo "Launch the console (from the Kali desktop, not headless SSH) with:"
+echo "    python3 app.py"
+echo
 echo "REMINDER: this script must be run during Phase 0, while the lab still has internet"
 echo "access. After Day 1, the network is cut and this script will fail."

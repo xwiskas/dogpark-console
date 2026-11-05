@@ -11,6 +11,22 @@ user clicks **Run**.
 in an editable field before anything runs; review it, edit it if needed, then run it
 yourself. Nothing here auto-executes.
 
+## Quick start on the Kali box
+
+Do this **during Phase 0, while the lab still has internet** (it's cut after Day 1):
+
+```bash
+git clone https://github.com/xwiskas/dogpark-console.git
+cd dogpark-console
+bash setup.sh      # installs python3-tk + the Kali tool list, preps wordlists, makes ~/dogpark
+python3 app.py     # launch the GUI (run from the Kali desktop, not a headless SSH session)
+```
+
+`setup.sh` needs sudo and internet. `app.py` is stdlib-only after that and runs fully offline.
+If you launch over SSH, use `ssh -X` for the GUI — but running it on the VM's own desktop is
+simplest. The on-box AI assistant should read [`AGENTS.md`](AGENTS.md) — it explains how the AI
+can use and extend the tool.
+
 ## Principles (non-negotiable, enforced in code)
 
 - **Scope lock.** Every target is checked against an authorized-CIDR allowlist (RFC1918 +
