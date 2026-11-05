@@ -13,8 +13,9 @@ import os
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, scrolledtext, ttk
+from types import SimpleNamespace
 
-from dogpark import evidence, report, tools
+from dogpark import custom, evidence, report, tools
 from dogpark.llm import LLMClient
 from dogpark.runner import Runner
 from dogpark.scope import Scope
@@ -53,12 +54,17 @@ class DogparkApp(tk.Tk):
         self.findings = evidence.FindingsStore(self.output_dir)
 
         self.current_phase = tk.IntVar(value=-1)  # default to the "All phases" view
+        self.stealth_mode = tk.BooleanVar(value=True)  # hide 'loud' commands by default
         self.day = tk.IntVar(value=1)
         self.target_var = tk.StringVar()
         self.scope_badge_text = tk.StringVar(value="enter a target")
         self.selected_action_id: str | None = None
         self.input_vars: dict[str, tk.StringVar] = {}
         self.command_var = tk.StringVar()
+
+        # User- and AI-added commands (loaded from the JSON store; same scope/run rules apply).
+        self.custom_path = custom.default_path()
+        self.custom_actions: tuple = custom.load_custom_actions(self.custom_path)
 
         self._build_layout()
         self._refresh_tree()
@@ -102,6 +108,13 @@ class DogparkApp(tk.Tk):
         phase_box.pack(side="left", padx=(2, 16))
         phase_box.bind("<<ComboboxSelected>>", lambda e: self._on_phase_changed(phase_box.current()))
 
+        ttk.Checkbutton(
+            bar,
+            text="Stealth mode (hide loud)",
+            variable=self.stealth_mode,
+            command=self._refresh_tree,
+        ).pack(side="left", padx=(0, 16))
+
         ttk.Label(bar, text=f"Output: {self.output_dir}").pack(side="left", padx=(0, 16))
 
         ttk.Label(bar, text="Day:").pack(side="left")
@@ -139,6 +152,8 @@ class DogparkApp(tk.Tk):
         ttk.Button(button_row, text="Explain output", command=self._on_explain).pack(side="left", padx=4)
         ttk.Button(button_row, text="What next?", command=self._on_suggest).pack(side="left", padx=4)
         ttk.Button(button_row, text="Add finding", command=self._on_add_finding).pack(side="left", padx=4)
+        ttk.Button(button_row, text="Add command", command=self._on_add_command).pack(side="left", padx=4)
+        ttk.Button(button_row, text="Reload custom", command=self._on_reload_custom).pack(side="left", padx=4)
         ttk.Button(button_row, text="Generate report", command=self._on_generate_report).pack(side="left", padx=4)
 
     def _build_console(self):
@@ -194,13 +209,30 @@ class DogparkApp(tk.Tk):
             relevant_tools = tools.all_tools()
         else:
             relevant_tools = tools.tools_for_phase(phase) or tools.all_tools()
+        stealth = self.stealth_mode.get()
+
+        def visible(action) -> bool:
+            # Stealth mode hides 'loud' commands so one can't be fired by accident.
+            return not (stealth and action.risk == "loud")
+
         # Host discovery pinned to the top, per spec.
         ordered = sorted(relevant_tools, key=lambda t: 0 if t.category == "discovery" else 1)
         for tool in ordered:
+            shown = [a for a in tool.actions if visible(a)]
+            if not shown:
+                continue
             tool_node = self.tree.insert("", "end", text=tool.name, values=(tool.name,), open=False)
-            for action in tool.actions:
-                # Show all actions of a listed tool; the "All phases" view lists every tool.
-                self.tree.insert(tool_node, "end", text=action.label, values=(action.id,))
+            for action in shown:
+                label = action.label + ("  ·loud" if action.risk == "loud" else "")
+                self.tree.insert(tool_node, "end", text=label, values=(action.id,))
+
+        # User/AI-added commands under their own clearly labelled group.
+        custom_shown = [a for a in self.custom_actions if visible(a)]
+        if custom_shown:
+            node = self.tree.insert("", "end", text=custom.CUSTOM_GROUP, values=(custom.CUSTOM_GROUP,), open=True)
+            for action in custom_shown:
+                label = action.label + ("  ·loud" if action.risk == "loud" else "")
+                self.tree.insert(node, "end", text=label, values=(action.id,))
 
     def _on_tree_select(self, event):
         selection = self.tree.selection()
@@ -211,13 +243,23 @@ class DogparkApp(tk.Tk):
         if not values:
             return
         action_id = values[0]
-        found = tools.find_action(action_id)
+        found = self._lookup_action(action_id)
         if not found:
             return  # a tool-group node, not an action
         tool, action = found
         self.selected_action_id = action.id
         self._render_action(tool, action)
         self._update_run_button_state()
+
+    def _lookup_action(self, action_id):
+        """Find (tool-like, action) across the built-in catalog and the custom/AI store."""
+        found = tools.find_action(action_id)
+        if found:
+            return found
+        for action in self.custom_actions:
+            if action.id == action_id:
+                return SimpleNamespace(name=custom.CUSTOM_GROUP), action
+        return None
 
     # ------------------------------------------------------------------
     # Action / command building
@@ -252,7 +294,7 @@ class DogparkApp(tk.Tk):
     def _current_action(self):
         if not self.selected_action_id:
             return None
-        found = tools.find_action(self.selected_action_id)
+        found = self._lookup_action(self.selected_action_id)
         return found[1] if found else None
 
     def _gather_values(self) -> dict:
@@ -322,6 +364,15 @@ class DogparkApp(tk.Tk):
         suggestion = self.llm.suggest_next(state)
         self._append_console(f"[suggest] {suggestion}")
 
+    def _on_reload_custom(self):
+        """Re-read the custom/AI command store (e.g. after the on-box AI appended to it)."""
+        self.custom_actions = custom.load_custom_actions(self.custom_path)
+        self._refresh_tree()
+        self._append_console(f"[custom] reloaded {len(self.custom_actions)} command(s) from {self.custom_path}")
+
+    def _on_add_command(self):
+        CustomCommandDialog(self)
+
     def _on_add_finding(self):
         dialog = FindingDialog(self, default_target=self.target_var.get().strip())
         self.wait_window(dialog)
@@ -372,6 +423,75 @@ class FindingDialog(tk.Toplevel):
     def _on_add(self):
         self.result = {k: v.get() for k, v in self.vars.items()}
         self.destroy()
+
+
+class CustomCommandDialog(tk.Toplevel):
+    """Add a user/AI command to the JSON store. Same safety screen as the module API — a
+    destructive template is refused here too."""
+
+    def __init__(self, app: "DogparkApp"):
+        super().__init__(app)
+        self.app = app
+        self.title("Add command")
+        self.geometry("560x340")
+
+        self.vars = {
+            "label": tk.StringVar(),
+            "phase": tk.StringVar(value="1"),
+            "risk": tk.StringVar(value="normal"),
+            "template": tk.StringVar(),
+            "needs": tk.StringVar(value="target output"),
+            "description": tk.StringVar(),
+        }
+        hints = {
+            "template": "command with {placeholders}, e.g. nmap -sV {target} -oA {output}/x",
+            "needs": "space-separated placeholder names this command needs",
+        }
+        for field, var in self.vars.items():
+            row = ttk.Frame(self)
+            row.pack(fill="x", padx=8, pady=3)
+            ttk.Label(row, text=field, width=12).pack(side="left")
+            if field == "risk":
+                ttk.Combobox(row, textvariable=var, values=list(tools.RISK_LEVELS), state="readonly").pack(
+                    side="left", fill="x", expand=True
+                )
+            else:
+                ttk.Entry(row, textvariable=var).pack(side="left", fill="x", expand=True)
+            if field in hints:
+                ttk.Label(self, text=hints[field], foreground="gray").pack(anchor="w", padx=86)
+
+        ttk.Label(
+            self,
+            text="Added commands follow the same rules: scope-locked, manual Run, and destructive "
+            "templates are refused.",
+            wraplength=520,
+            foreground="gray",
+        ).pack(anchor="w", padx=10, pady=(6, 0))
+
+        button_row = ttk.Frame(self)
+        button_row.pack(fill="x", padx=8, pady=8)
+        ttk.Button(button_row, text="Add", command=self._on_add).pack(side="right")
+        ttk.Button(button_row, text="Cancel", command=self.destroy).pack(side="right", padx=4)
+
+    def _on_add(self):
+        try:
+            phase = int(self.vars["phase"].get() or "1")
+        except ValueError:
+            phase = 1
+        entry = {
+            "label": self.vars["label"].get().strip(),
+            "phase": phase,
+            "risk": self.vars["risk"].get(),
+            "template": self.vars["template"].get().strip(),
+            "needs": self.vars["needs"].get().split(),
+            "description": self.vars["description"].get().strip(),
+        }
+        ok, msg = custom.add_custom_action(entry, self.app.custom_path)
+        if ok:
+            self.app._on_reload_custom()
+            self.destroy()
+        else:
+            messagebox.showerror("Command refused", msg)
 
 
 def main():

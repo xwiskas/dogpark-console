@@ -46,6 +46,31 @@ objective, so the console is built not to give you away:
   authenticated code execution).
 - **No out-of-scope noise.** Because targets are scope-locked, the tool won't fire traffic at
   the lab's scoring/monitoring infrastructure or anything outside the authorized subnet.
+- **Stealth mode.** A top-bar toggle (on by default) hides every command labelled `loud`, so a
+  noisy scan or spray can't be fired by accident mid-engagement. Turn it off when you knowingly
+  accept the detection risk; `loud` commands are tagged `·loud` in the tree.
+
+## Adding your own / AI-added commands
+
+The Kali box's local AI assistant (and you) can extend the command library at runtime — without
+writing or running code. New commands are plain data in a JSON store
+(`~/dogpark/custom_actions.json`, override with `DOGPARK_HOME`) and appear in the GUI under a
+**"Custom (AI / your additions)"** group. Added commands obey the same rules as the built-in
+catalog: scope-locked target, manual Run, and a safety screen that **refuses destructive/DoS
+templates** (`dos`, `flood`, `rm -rf /`, fork bombs, disk wipes, etc.).
+
+- **In the GUI:** click **Add command**, fill in label / phase / risk / template / needs, Add.
+- **From the on-box AI** (or a script), either append to the JSON file or call:
+  ```
+  python3 -m dogpark.custom --tool nmap --label "UDP top-50 quiet" --phase 1 --risk quiet \
+      --template "nmap -sU --top-ports 50 -T2 {target} -oA {output}/udp_{target}" \
+      --needs target output --description "Quiet UDP sweep of the 50 most common UDP ports."
+  ```
+  Then click **Reload custom** in the GUI (or restart) to pick up new entries. A template that
+  trips the safety screen is refused with a reason and nothing is written.
+
+Custom commands are marked `[custom — not vetted by the built-in catalog]` in their description
+so you always know which commands came from the AI versus the reviewed base set.
 
 ## Phase 0 — set up while you still have internet
 
