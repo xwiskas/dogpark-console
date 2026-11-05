@@ -28,6 +28,25 @@ yourself. Nothing here auto-executes.
   the day's session log (`<output>/session/dayN.jsonl`). Findings, time-to-compromise, and
   the final Appendix N report all build from that trail.
 
+## Staying undetected (operational security)
+
+This is a red-team/blue-team exercise where staying unseen by the blue team is a scored
+objective, so the console is built not to give you away:
+
+- **The tool and the AI helper never leave the box.** The AI "Explain" / "What next?" helper
+  talks only to a loopback LLM on the Kali VM (`127.0.0.1`/`localhost`/`::1`), verified by a
+  real address check — a spoofed host like `http://127.0.0.1.evil.com/` is refused. Your
+  recon data, tool output, and prompts are never sent off the VM where a defender could see
+  them. The console sends no telemetry and makes no internet calls of its own.
+- **Quiet by default, loud by choice.** Every command is labelled `quiet` / `normal` / `loud`
+  by how detectable it is. There is a full stealth/evasion set (slow timing `-T0/-T1`,
+  `--scan-delay`, fragmentation, decoys, source-port spoofing, rate-limited web fuzzing,
+  null-session/passive enumeration, offline cracking). The AI helper is instructed to prefer
+  the quiet options and to warn you before anything noisy (full scans, sprays, brute force,
+  authenticated code execution).
+- **No out-of-scope noise.** Because targets are scope-locked, the tool won't fire traffic at
+  the lab's scoring/monitoring infrastructure or anything outside the authorized subnet.
+
 ## Phase 0 — set up while you still have internet
 
 Internet access is cut after Day 1. Do this now:

@@ -89,24 +89,6 @@ _enum4linux = (
 
 _smbclient = (
     Action(
-        id="smbclient.list_null",
-        label="List shares (null session)",
-        phase=3,
-        description="List shares with an anonymous/null session — fast check for guest-readable shares.",
-        risk="quiet",
-        template="smbclient -L //{target}/ -N | tee {output}/smbclient_shares_{target}.txt",
-        needs=("target", "output"),
-    ),
-    Action(
-        id="smbclient.list_auth",
-        label="List shares (authenticated)",
-        phase=4,
-        description="List shares using known credentials — usually reveals more than a null session.",
-        risk="quiet",
-        template="smbclient -L //{target}/ -U {domain}\\\\{user}%{password} | tee {output}/smbclient_shares_auth_{target}.txt",
-        needs=("target", "user", "password", "domain", "output"),
-    ),
-    Action(
         id="smbclient.connect",
         label="Connect to a share",
         phase=4,

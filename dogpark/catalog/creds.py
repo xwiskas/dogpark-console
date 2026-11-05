@@ -326,16 +326,6 @@ EXTRA_ACTIONS: dict[str, tuple[Action, ...]] = {
             needs=("mask", "hashfile"),
         ),
         Action(
-            id="john.show_cracked",
-            label="Show cracked results",
-            phase=5,
-            description="Prints previously-cracked plaintext results stored in john's local potfile for "
-            "this hash file.",
-            risk="quiet",
-            template="john --show {hashfile}",
-            needs=("hashfile",),
-        ),
-        Action(
             id="john.session_restore",
             label="Named session + restore",
             phase=6,

@@ -22,6 +22,7 @@ from dogpark.scope import Scope
 CONFIG_PATH = Path(__file__).resolve().parent / "config.json"
 
 PHASE_CHOICES = [
+    (-1, "All phases"),
     (0, "0 Pre-engagement"),
     (1, "1-2 Subscreen"),
     (3, "3-5 DMZ"),
@@ -51,7 +52,7 @@ class DogparkApp(tk.Tk):
         self.llm = LLMClient.from_config(self.config_data)
         self.findings = evidence.FindingsStore(self.output_dir)
 
-        self.current_phase = tk.IntVar(value=0)
+        self.current_phase = tk.IntVar(value=-1)  # default to the "All phases" view
         self.day = tk.IntVar(value=1)
         self.target_var = tk.StringVar()
         self.scope_badge_text = tk.StringVar(value="enter a target")
@@ -187,14 +188,19 @@ class DogparkApp(tk.Tk):
     def _refresh_tree(self):
         self.tree.delete(*self.tree.get_children())
         phase = self.current_phase.get()
-        relevant_tools = tools.tools_for_phase(phase) or tools.all_tools()
+        # phase == -1 is the "All phases" view: show every tool and every action so nothing is
+        # ever hidden from the Run button. Otherwise scope the tree to the selected phase.
+        if phase == -1:
+            relevant_tools = tools.all_tools()
+        else:
+            relevant_tools = tools.tools_for_phase(phase) or tools.all_tools()
         # Host discovery pinned to the top, per spec.
         ordered = sorted(relevant_tools, key=lambda t: 0 if t.category == "discovery" else 1)
         for tool in ordered:
             tool_node = self.tree.insert("", "end", text=tool.name, values=(tool.name,), open=False)
             for action in tool.actions:
-                if action.phase <= max(phase, action.phase) and (phase == 0 or action.phase in tool.phases or True):
-                    self.tree.insert(tool_node, "end", text=action.label, values=(action.id,))
+                # Show all actions of a listed tool; the "All phases" view lists every tool.
+                self.tree.insert(tool_node, "end", text=action.label, values=(action.id,))
 
     def _on_tree_select(self, event):
         selection = self.tree.selection()

@@ -21,7 +21,30 @@ TIMEOUT_SECONDS = 3
 
 
 def _is_local_endpoint(url: str) -> bool:
-    return "127.0.0.1" in url or "localhost" in url
+    """True only if the URL's host is a genuine loopback address.
+
+    This is the guardrail that keeps the AI helper on-box: in a red/blue lab exercise the
+    tool must never send recon data, output, or prompts off the Kali VM, where a blue-team
+    sensor could see it. A substring match ("127.0.0.1" in url) is unsafe — e.g.
+    http://127.0.0.1.evil.com/ or http://host/?x=localhost would slip through — so we parse
+    the host and verify it is loopback (127.0.0.0/8, ::1, or the literal name 'localhost').
+    Anything else, or an unparseable URL, is refused.
+    """
+    import ipaddress
+    from urllib.parse import urlparse
+
+    try:
+        host = urlparse(url).hostname
+    except ValueError:
+        return False
+    if not host:
+        return False
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 def _post_json(url: str, payload: dict, timeout: int = TIMEOUT_SECONDS) -> Optional[dict]:
@@ -98,8 +121,11 @@ class LLMClient:
         """Plain-English read of a tool's output. Falls back to a canned note if no local
         model answers."""
         system = (
-            "You explain pentest tool output in plain English for a student in an authorized "
-            "lab exercise. Be concise and factual. Do not suggest commands here."
+            "You explain pentest tool output in plain English for a student in an authorized, "
+            "isolated university cyberlab red-team/blue-team exercise. Be concise and factual. "
+            "Do not suggest commands here. If the output suggests the activity was noisy or likely "
+            "logged by a defender, say so briefly, since staying undetected by the blue team is "
+            "part of the exercise."
         )
         user = f"Context: {context}\n\nTool output:\n{output_text[:4000]}"
         reply = self._chat(system, user)
@@ -118,10 +144,16 @@ class LLMClient:
         target = state.get("target", "unknown")
         last_action = state.get("last_action", "none")
         system = (
-            "You suggest the next 1-3 reconnaissance/enumeration steps for an authorized "
-            "university cyberlab pentest exercise. Only ever suggest actions against targets "
-            "the user says are in scope for the current phase. Never suggest destructive, "
-            "DoS, or flooding actions. Output plain text, no commands to auto-run."
+            "You suggest the next 1-3 reconnaissance/enumeration steps for an authorized, "
+            "isolated university cyberlab red-team/blue-team exercise. Staying undetected by the "
+            "blue team is a scored objective, so PREFER low-and-slow, quiet options (slow timing, "
+            "rate limiting, null-session/passive enumeration, offline cracking) and explicitly "
+            "WARN when a step is noisy or likely to be logged/alerted (full-range or aggressive "
+            "scans, password sprays, service brute force, authenticated code execution). Only ever "
+            "suggest actions against targets the user says are in scope for the current phase, on "
+            "the private lab network. Never suggest reaching the internet or anything off the lab, "
+            "and never destructive, DoS, or flooding actions. Output plain text, no commands to "
+            "auto-run — the student verifies and runs everything manually."
         )
         user = (
             f"Current phase: {phase}\nCurrent target: {target}\nLast action run: {last_action}\n"
@@ -133,8 +165,9 @@ class LLMClient:
         else:
             body = (
                 f"[No local LLM reachable — canned guidance] For phase {phase} against "
-                f"{target}, consider: confirming open services with a version scan, enumerating "
-                "any web/SMB services found, and checking for null-session or default-credential "
-                "exposure before moving to authenticated enumeration."
+                f"{target}, stay quiet first: a slow/polite version scan of only the ports you "
+                "need, then null-session or passive enumeration of any web/SMB services found, "
+                "and offline checks before anything authenticated. Save louder moves (full-range "
+                "or aggressive scans, sprays, brute force) for when you accept the detection risk."
             )
         return f"{AI_PREFIX}: {body}"
