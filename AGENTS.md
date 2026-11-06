@@ -77,13 +77,20 @@ under `/opt/pentest-tools/`); you do not need a GUI button. Discover with `which
 `ls /opt/pentest-tools/`. See `DEPLOYMENT.md` for the full inventory + per-tool noise ratings.
 
 - **On PATH (apt/pipx):** nmap, nikto, enum4linux(-ng), gobuster, ffuf, feroxbuster, nuclei,
-  hydra, hashcat, john, smbclient, smbmap, crackmapexec, netexec, impacket-scripts, evil-winrm,
-  metasploit, sqlmap, sqlitebrowser, wireshark, tcpdump, arpwatch, p0f, netcat, socat,
-  ldapdomaindump, bloodhound.py, responder, mitm6, certipy, bloodyAD, coercer, ldeep, pywerview,
-  adidnsdump, arp-scan, netdiscover, fping, nbtscan, onesixtyone, snmpwalk, dnsrecon, ssh-audit.
+  hydra, hashcat, john, hashid, name-that-hash, cewl, smbclient, smbmap, crackmapexec, netexec,
+  impacket-scripts, evil-winrm, metasploit, sqlmap, sqlitebrowser, wireshark, tcpdump, arpwatch,
+  p0f, netcat, socat, proxychains4, chisel, ldapdomaindump, ldap-utils (ldapsearch), bloodhound.py,
+  responder, mitm6, certipy, bloodyAD, coercer, ldeep, pywerview, adidnsdump, arp-scan, netdiscover,
+  fping, nbtscan, onesixtyone, snmpwalk, dnsrecon, ssh-audit, whatweb, eyewitness,
+  searchsploit (exploitdb).
 - **Under `/opt/pentest-tools/`:** BloodHound, PEASS-ng (linpeas/winpeas), PowerSploit, mimikatz,
-  Empire, Veil, pspy, LinEnum, routersploit, kerbrute, ligolo-ng, Snaffler, PCredz, PetitPotam,
-  windapsearch, RustHound-CE, sliver.
+  Empire, Veil, pspy, LinEnum, lse, adPEAS, routersploit, kerbrute, ligolo-ng, Snaffler, PCredz,
+  PetitPotam, windapsearch, RustHound-CE, sliver, SharpCollection (precompiled Rubeus/Seatbelt/
+  Certify/SharpHound .exe).
+- **Offline reference (no internet after Day 1 — grep these instead of searching the web):**
+  `/opt/pentest-tools/hacktricks` (methodology), `/opt/pentest-tools/PayloadsAllTheThings`
+  (payloads/cheat sheets), `/opt/pentest-tools/GTFOBins` (Linux lolbins), `/opt/pentest-tools/LOLBAS`
+  (Windows lolbins), and `searchsploit <service version>` for the offline Exploit-DB.
 - **Stay quiet (scored):** prefer the quiet tools (p0f, arp-scan, netdiscover, responder `-A`,
   ldeep/windapsearch/bloodhound over LDAP, certipy, kerbrute spraying slowly). The LOUD ones —
   coercer, PetitPotam, mitm6, responder poisoning, nikto, sqlmap, hydra, `nmap -T4/-T5` — warn
