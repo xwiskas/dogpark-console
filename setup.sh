@@ -32,6 +32,8 @@ sudo apt install -y \
     `# --- recon / discovery (quiet, internal) ---` \
     arp-scan netdiscover fping nbtscan onesixtyone snmp snmp-mibs-downloader \
     dnsrecon p0f ssh-audit \
+    `# --- offline exploit DB, pivoting, web triage, hash/wordlist ---` \
+    exploitdb proxychains4 chisel whatweb eyewitness hashid cewl ldap-utils \
     || FAILED+=("one or more apt packages (see apt output above)")
 
 # ===========================================================================
@@ -54,6 +56,7 @@ pipx_install ldeep          "ldeep (deep LDAP enum)"
 pipx_install pywerview      "pywerview (PowerView-in-python)"
 pipx_install adidnsdump     "adidnsdump (AD-integrated DNS dump)"
 pipx_install bloodhound-ce  "BloodHound CE python collector"
+pipx_install name-that-hash "name-that-hash (hash identification)"
 
 # ===========================================================================
 # 3. GitHub repos -> /opt/pentest-tools/  (not in apt; grab now)
@@ -86,6 +89,15 @@ clone https://github.com/topotam/PetitPotam.git           PetitPotam   "coercion
 clone https://github.com/ropnop/windapsearch.git          windapsearch "LDAP enum (quiet)"
 clone https://github.com/g0h4n/RustHound-CE.git           RustHound-CE "BloodHound CE collector (fast)"
 clone https://github.com/BishopFox/sliver.git             sliver       "modern OPSEC C2 (build on box)"
+# --- offline reference material (CRITICAL: no internet after Day 1) ---
+clone https://github.com/HackTricks-wiki/hacktricks.git             hacktricks           "offline pentest methodology bible"
+clone https://github.com/swisskyrepo/PayloadsAllTheThings.git       PayloadsAllTheThings "offline payloads + cheat sheets"
+clone https://github.com/GTFOBins/GTFOBins.github.io.git            GTFOBins             "Linux lolbin priv-esc reference"
+clone https://github.com/LOLBAS-Project/LOLBAS.git                  LOLBAS               "Windows lolbin reference"
+# --- precompiled .NET + more priv-esc ---
+clone https://github.com/Flangvik/SharpCollection.git               SharpCollection      "precompiled .NET (Rubeus/Seatbelt/Certify/SharpHound)"
+clone https://github.com/diego-treitos/linux-smart-enumeration.git  lse                  "Linux priv-esc enumeration"
+clone https://github.com/61106960/adPEAS.git                        adPEAS               "one-shot AD enumeration"
 
 # ===========================================================================
 # 4. Wordlists

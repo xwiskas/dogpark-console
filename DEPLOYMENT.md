@@ -64,6 +64,13 @@ retry before the network drops.
 | arp-scan / netdiscover / fping / nbtscan | Quiet internal host discovery (find the blue team) | quiet |
 | onesixtyone / snmp | SNMP enumeration (routers / perimeter) | quiet |
 | ssh-audit | SSH config/version audit (perimeter) | quiet |
+| exploitdb (searchsploit) | **Offline Exploit-DB** — find exploits with no internet | silent |
+| proxychains4 / chisel | Run tools through a foothold / tunneling | quiet |
+| whatweb | Web fingerprinting (passive-ish) | quiet |
+| eyewitness | Screenshot every web service for fast triage | normal |
+| hashid | Identify hash type before cracking | silent |
+| cewl | Build wordlist from target's own site | quiet |
+| ldap-utils (ldapsearch) | Raw lightweight LDAP queries | quiet |
 
 ### 1b. pipx tools (modern AD tooling, installed by `setup.sh`)
 
@@ -76,6 +83,7 @@ retry before the network drops.
 | pywerview | PowerView-style enum in python | quiet |
 | adidnsdump | AD-integrated DNS zone dump | quiet |
 | bloodhound-ce | BloodHound CE collector | quiet |
+| name-that-hash | Hash identification | silent |
 
 ### 1c. Git repos → `/opt/pentest-tools/` (cloned by `setup.sh`, NOT in apt)
 
@@ -98,6 +106,13 @@ retry before the network drops.
 | ropnop/windapsearch | LDAP enumeration | quiet |
 | g0h4n/RustHound-CE | Fast BloodHound CE collector | quiet |
 | BishopFox/sliver | Modern OPSEC C2 (build on box) | normal |
+| HackTricks-wiki/hacktricks | **Offline methodology bible** | reference |
+| swisskyrepo/PayloadsAllTheThings | Offline payloads + cheat sheets | reference |
+| GTFOBins/GTFOBins.github.io | Linux lolbin priv-esc reference | reference |
+| LOLBAS-Project/LOLBAS | Windows lolbin reference | reference |
+| Flangvik/SharpCollection | Precompiled .NET (Rubeus/Seatbelt/Certify/SharpHound) | normal |
+| diego-treitos/linux-smart-enumeration | Linux priv-esc enumeration | silent |
+| 61106960/adPEAS | One-shot AD enumeration | quiet |
 
 ### 1c. The DOGPARK Console itself
 
