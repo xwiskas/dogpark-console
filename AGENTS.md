@@ -70,3 +70,22 @@ Run from the Kali desktop session. Everything is stdlib-only (needs `python3-tk`
 - `dogpark/scope.py` — the scope lock. `dogpark/llm.py` — the localhost-only AI client.
 - `~/dogpark/custom_actions.json` — your added commands. `~/dogpark/runs|session|findings|loot`
   — the evidence trail.
+
+## Installed tooling — what you can run on this box
+All of this is installed by `setup.sh` during Phase 0. You run it directly (it's all on PATH or
+under `/opt/pentest-tools/`); you do not need a GUI button. Discover with `which -a <tool>` or
+`ls /opt/pentest-tools/`. See `DEPLOYMENT.md` for the full inventory + per-tool noise ratings.
+
+- **On PATH (apt/pipx):** nmap, nikto, enum4linux(-ng), gobuster, ffuf, feroxbuster, nuclei,
+  hydra, hashcat, john, smbclient, smbmap, crackmapexec, netexec, impacket-scripts, evil-winrm,
+  metasploit, sqlmap, sqlitebrowser, wireshark, tcpdump, arpwatch, p0f, netcat, socat,
+  ldapdomaindump, bloodhound.py, responder, mitm6, certipy, bloodyAD, coercer, ldeep, pywerview,
+  adidnsdump, arp-scan, netdiscover, fping, nbtscan, onesixtyone, snmpwalk, dnsrecon, ssh-audit.
+- **Under `/opt/pentest-tools/`:** BloodHound, PEASS-ng (linpeas/winpeas), PowerSploit, mimikatz,
+  Empire, Veil, pspy, LinEnum, routersploit, kerbrute, ligolo-ng, Snaffler, PCredz, PetitPotam,
+  windapsearch, RustHound-CE, sliver.
+- **Stay quiet (scored):** prefer the quiet tools (p0f, arp-scan, netdiscover, responder `-A`,
+  ldeep/windapsearch/bloodhound over LDAP, certipy, kerbrute spraying slowly). The LOUD ones —
+  coercer, PetitPotam, mitm6, responder poisoning, nikto, sqlmap, hydra, `nmap -T4/-T5` — warn
+  the operator before suggesting them. Add any new command you build via `dogpark.custom` so it
+  shows up in the GUI for the operator to review and run.
