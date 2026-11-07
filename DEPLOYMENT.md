@@ -71,6 +71,13 @@ retry before the network drops.
 | hashid | Identify hash type before cracking | silent |
 | cewl | Build wordlist from target's own site | quiet |
 | ldap-utils (ldapsearch) | Raw lightweight LDAP queries | quiet |
+| sslscan | TLS/SSL cipher & cert audit (perimeter, Phase 1) | quiet |
+| wfuzz | Web parameter/content fuzzing (Day 4 param discovery) | normal |
+| freerdp2-x11 (xfreerdp) | RDP client — Windows login/cred-reuse (3b, 5c, Phase 3) | normal |
+| dirb + wordlists | `/usr/share/wordlists/dirb/common.txt`, rockyou symlink | — |
+| macchanger | MAC spoofing (Appendix J evasion) | quiet |
+| dsniff (arpspoof) | ARP tooling (Appendix H) — MITM, use with care | **loud** |
+| python3-pip / curl / wget / unzip | Base utilities for the provisioner & binary pulls | — |
 
 ### 1b. pipx tools (modern AD tooling, installed by `setup.sh`)
 
@@ -114,7 +121,22 @@ retry before the network drops.
 | diego-treitos/linux-smart-enumeration | Linux priv-esc enumeration | silent |
 | 61106960/adPEAS | One-shot AD enumeration | quiet |
 
-### 1c. The DOGPARK Console itself
+### 1d. Precompiled binaries → `/opt/pentest-tools/bin/` (fetched by `setup.sh`)
+
+The playbook runs these **by name** (`./pspy64`, `./linpeas.sh`, `.\winPEAS.exe`, `mimikatz.exe`).
+Source clones above do **not** yield a runnable artifact, so `setup.sh` pulls the release builds
+during Phase 0. **If any land in the `FAILED` list, grab them manually before the network drops.**
+
+| Binary | Purpose | Noise |
+|--------|---------|-------|
+| pspy64 / pspy32 | Process snooping without root (Linux) | silent |
+| linpeas.sh | LinPEAS priv-esc, ready-to-run | silent |
+| winPEASx64.exe | WinPEAS priv-esc (Windows) | silent |
+| mimikatz_trunk/ | mimikatz `.exe` set (unzipped from release) | normal |
+
+> SharpHound.exe, Rubeus, Seatbelt, Certify come precompiled in **SharpCollection** (§1c).
+
+### 1e. The DOGPARK Console itself
 
 The repo (`dogpark-console`) **is** a tool — 219 scope-locked, stealth-aware commands with a
 GUI, an AI recon-chat panel, evidence logging, and a report generator. It is stdlib-only
@@ -235,7 +257,7 @@ sqlmap -u "http://<ip>/page?id=1" --batch --dbs
 - [ ] `git clone` the dogpark-console repo
 - [ ] `bash setup.sh` — confirm **0 failed repos** at the end (retry any while still online)
 - [ ] `rockyou.txt` unzipped; `/usr/share/seclists` present
-- [ ] `/opt/pentest-tools/` has all 9 repos
+- [ ] `/opt/pentest-tools/` has all repos (25); `/opt/pentest-tools/bin/` has pspy64, linpeas.sh, winPEASx64.exe, mimikatz_trunk/
 - [ ] `ss -ltnp | grep -E '11434|8642|20128'` — decide live-model vs canned (§2)
 - [ ] Confirm lab subnet / target IPs; set `config.json` `lab_subnet` + `inventory`
 - [ ] Launch `python3 app.py` — scope badge works, AGENTS.md readable by on-box AI
