@@ -34,7 +34,19 @@ sudo apt install -y \
     dnsrecon p0f ssh-audit \
     `# --- offline exploit DB, pivoting, web triage, hash/wordlist ---` \
     exploitdb proxychains4 chisel whatweb eyewitness hashid cewl ldap-utils \
+    `# --- playbook v3.0 explicit tools (Phase 1 / Appendices A-J) ---` \
+    sslscan wfuzz dirb wordlists macchanger dsniff \
+    python3-pip curl wget unzip \
     || FAILED+=("one or more apt packages (see apt output above)")
+
+# RDP client: the playbook calls `xfreerdp` (freerdp2). Kali rolling may ship freerdp3
+# instead, so try the v2 package first and fall back without aborting the whole run.
+echo "  [rdp] installing an xfreerdp client ..."
+if ! command -v xfreerdp >/dev/null 2>&1; then
+    sudo apt install -y freerdp2-x11 2>/dev/null \
+        || sudo apt install -y freerdp3-x11 2>/dev/null \
+        || FAILED+=("freerdp (xfreerdp RDP client — install manually)")
+fi
 
 # ===========================================================================
 # 2. pipx tools (modern Python AD tooling not always in apt)
@@ -100,6 +112,41 @@ clone https://github.com/diego-treitos/linux-smart-enumeration.git  lse         
 clone https://github.com/61106960/adPEAS.git                        adPEAS               "one-shot AD enumeration"
 
 # ===========================================================================
+# 3.5 Precompiled binaries / release artifacts
+#     The playbook runs these BY NAME (./pspy64, ./linpeas.sh, .\winPEAS.exe,
+#     mimikatz.exe). Source clones above do NOT give you a runnable binary, so
+#     grab the release builds now — there is no internet after Day 1.
+#     (SharpHound.exe, Rubeus, Seatbelt, Certify come from SharpCollection above.)
+# ===========================================================================
+echo
+echo "=== [3.5/5] precompiled binaries -> /opt/pentest-tools/bin ==="
+BINDIR=/opt/pentest-tools/bin
+sudo mkdir -p "$BINDIR"; sudo chown "$USER" "$BINDIR"
+fetch() {  # fetch <url> <outfile> <description>
+    if [ -s "$BINDIR/$2" ]; then echo "  [skip] $2 already present"; return; fi
+    echo "  [get]  $2 — $3"
+    if curl -fsSL "$1" -o "$BINDIR/$2" 2>/dev/null || wget -q "$1" -O "$BINDIR/$2" 2>/dev/null; then
+        chmod +x "$BINDIR/$2" 2>/dev/null || true
+    else
+        rm -f "$BINDIR/$2"; FAILED+=("binary:$2 ($1)")
+    fi
+}
+fetch https://github.com/DominicBreuker/pspy/releases/latest/download/pspy64 pspy64 "process snooping, no root (Linux x64)"
+fetch https://github.com/DominicBreuker/pspy/releases/latest/download/pspy32 pspy32 "pspy (Linux x86)"
+fetch https://github.com/peass-ng/PEASS-ng/releases/latest/download/linpeas.sh   linpeas.sh      "LinPEAS priv-esc (ready-to-run)"
+fetch https://github.com/peass-ng/PEASS-ng/releases/latest/download/winPEASx64.exe winPEASx64.exe "WinPEAS priv-esc (Windows x64)"
+# mimikatz ships its .exe set only as a release zip:
+if [ -d "$BINDIR/mimikatz_trunk" ]; then
+    echo "  [skip] mimikatz already extracted"
+elif curl -fsSL https://github.com/gentilkiwi/mimikatz/releases/latest/download/mimikatz_trunk.zip -o "$BINDIR/mimikatz_trunk.zip" 2>/dev/null; then
+    echo "  [get]  mimikatz_trunk.zip — Windows credential dumping (binaries)"
+    unzip -oq "$BINDIR/mimikatz_trunk.zip" -d "$BINDIR/mimikatz_trunk" 2>/dev/null && rm -f "$BINDIR/mimikatz_trunk.zip" \
+        || FAILED+=("mimikatz unzip (extract $BINDIR/mimikatz_trunk.zip manually)")
+else
+    FAILED+=("binary:mimikatz_trunk.zip")
+fi
+
+# ===========================================================================
 # 4. Wordlists
 # ===========================================================================
 echo
@@ -117,8 +164,9 @@ fi
 # ===========================================================================
 echo
 echo "=== [5/5] output directories ==="
-mkdir -p ~/dogpark/{runs,session,findings,loot,report,notes}
-echo "  Created ~/dogpark/{runs,session,findings,loot,report,notes}"
+# Playbook v3.0 workspace tree (so its copy-paste commands land) + console dirs.
+mkdir -p ~/dogpark/{recon,exploits,loot,reports,screenshots,sessions,runs,findings,notes}
+echo "  Created ~/dogpark/{recon,exploits,loot,reports,screenshots,sessions,runs,findings,notes}"
 
 echo
 echo "=== Done ==="
@@ -130,5 +178,7 @@ else
     echo "Everything installed/cloned OK."
 fi
 echo
-echo "Launch the console (from the Kali desktop, not headless SSH) with:  python3 app.py"
+echo "Tools:   apt kit on PATH | source repos in /opt/pentest-tools/ | binaries in /opt/pentest-tools/bin/"
+echo "Verify:  nmap --version; crackmapexec --version; sqlmap --version; evil-winrm --version; xfreerdp --version"
+echo "         ls /opt/pentest-tools/bin/ (pspy64, linpeas.sh, winPEASx64.exe, mimikatz_trunk/)"
 echo "REMINDER: run this during Phase 0 while the lab still has internet. After Day 1 it's cut."
