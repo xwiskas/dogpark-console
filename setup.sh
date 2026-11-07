@@ -48,6 +48,16 @@ if ! command -v xfreerdp >/dev/null 2>&1; then
         || FAILED+=("freerdp (xfreerdp RDP client — install manually)")
 fi
 
+# Initialize the Metasploit database (Phase 0 checklist item — msf db-backed
+# features need this; do it now while Postgres can be set up).
+echo "  [msf] initializing Metasploit database (msfdb init) ..."
+if command -v msfdb >/dev/null 2>&1; then
+    msfdb init >/dev/null 2>&1 || sudo msfdb init >/dev/null 2>&1 \
+        || FAILED+=("msfdb init (run 'msfdb init' manually once online)")
+else
+    FAILED+=("msfdb not found (metasploit-framework may not have installed)")
+fi
+
 # ===========================================================================
 # 2. pipx tools (modern Python AD tooling not always in apt)
 # ===========================================================================
